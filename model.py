@@ -184,23 +184,25 @@ def inference(images):
   res4f = graph.get_operation_by_name("res4f/relu").outputs[0]
   res5a = graph.get_operation_by_name("res5a/relu").outputs[0]
   res5b = graph.get_operation_by_name("res5b/relu").outputs[0]
-  res5c = graph.get_operation_by_name("res5c/relu").outputs[0]
+#  res5c = graph.get_operation_by_name("res5c/relu").outputs[0] # Not used due to the duplication of pool5
   pool5 = graph.get_operation_by_name("pool5").outputs[0]
   res_prob = graph.get_operation_by_name("prob").outputs[0]
 
   ###### Bypass layers
   # Attach fc layers to all (pooled) layers
   base_res_layers = [conv1, res2a, res2b, res2c, res3a, res3b, res3c, res3d, res4a,
-                     res4b, res4c, res4d, res4e, res4f, res5a, res5b, res5c]
+                     res4b, res4c, res4d, res4e, res4f, res5a, res5b]
   base_res_layer_names = ["conv1", "res2a", "res2b", "res2c", "res3a", "res3b", "res3c", "res3d", "res4a",
-                          "res4b", "res4c", "res4d", "res4e", "res4f", "res5a", "res5b", "res5c"]
+                          "res4b", "res4c", "res4d", "res4e", "res4f", "res5a", "res5b"]
+  bypass_pool_sizes = [14] + [17] * 3 + [12] * 4 + [8] * 6 + [7] * 2
+  bypass_pool_strides = [14] + [13] * 3 + [8] * 4 + [6] * 6 + [1] * 2
   bypass_layers = []
   with tf.variable_scope('bypass') as scope:
-    for layer, name in zip(base_res_layers, base_res_layer_names):
+    for layer, name, pool_size, pool_stride in zip(base_res_layers, base_res_layer_names, bypass_pool_sizes, bypass_pool_strides):
       with tf.variable_scope(name):
         # pool = tf.nn.max_pool(layer, ksize=[1, layer.get_shape()[1], layer.get_shape()[2], 1], strides=[1, 1, 1, 1], padding='VALID')
-        pool = tf.nn.avg_pool(layer, ksize=[1, layer.get_shape()[1], layer.get_shape()[2], 1], strides=[1, 1, 1, 1], padding='VALID')
-        flattened = tf.reshape(pool, [pool.get_shape()[0].value, pool.get_shape()[3].value])
+        pool = tf.nn.avg_pool(layer, ksize=[1, pool_size, pool_size, 1], strides=[1, pool_stride, pool_stride, 1], padding='VALID')
+        flattened = tf.reshape(pool, [pool.get_shape()[0].value, pool.get_shape()[1].value * pool.get_shape()[2].value * pool.get_shape()[3].value])
         weights = utils.tf_variable_weight_decay('weights', [flattened.get_shape()[1].value, data_input.NUM_ATTRS], tf.truncated_normal_initializer(stddev=0.01))
         biases = utils.tf_variable('biases', [data_input.NUM_ATTRS], tf.constant_initializer(value=0.0))
         fc = tf.nn.relu(tf.nn.bias_add(tf.matmul(flattened, weights), biases), name="fc")
@@ -414,13 +416,14 @@ def train(total_loss, global_step):
       print('\tL2 loss added: %s(strength: %f)' % (var.name, l2_weight))
 
   # Apply proximal gradient for the variables with l1 lasso loss
+  # Non-negative weights constraint
   l1_op_list = []
   if L1_LOSS_WEIGHT > 0:
     for var in tf.get_collection(utils.LASSO_KEY):
       th_t = tf.fill(tf.shape(var), tf.convert_to_tensor(L1_LOSS_WEIGHT) * lr)
       zero_t = tf.zeros(tf.shape(var))
       var_temp = var - th_t * tf.sign(var)
-      assign_op = var.assign(tf.select(tf.less(tf.abs(var), th_t), zero_t, var_temp))
+      assign_op = var.assign(tf.select(tf.less(var, th_t), zero_t, var_temp))
       l1_op_list.append(assign_op)
       print('\tL1 loss added: %s(strength: %f)' % (var.name, L1_LOSS_WEIGHT))
 
