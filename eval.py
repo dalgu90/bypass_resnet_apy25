@@ -27,8 +27,6 @@ def evaluate():
     print('\tDataset: %s data' % ('Training' if FLAGS.train_data else 'Test'))
     print('\tOutput: %s' % FLAGS.output)
 
-    with open(DATASET_TEST_PATH, 'r') as fd:
-        total_cnt = len(fd.readlines())
     with open(DATASET_ATTRIBUTE_PATH, 'r') as fd:
         attribute_list = [temp.strip() for temp in fd.readlines()]
     batch_size = FLAGS.batch_size
@@ -37,6 +35,11 @@ def evaluate():
     with tf.Graph().as_default():
         test_images, test_labels = model.inputs(not FLAGS.train_data, False)
         test_probs = model.inference(test_images)
+
+        if FLAGS.train_data:
+            total_cnt = data_input.NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN
+        else:
+            total_cnt = data_input.NUM_EXAMPLES_PER_EPOCH_FOR_EVAL
 
         # Start running operations on the Graph.
         init = tf.initialize_all_variables()
@@ -71,6 +74,7 @@ def evaluate():
         result_ll = [[0 for __ in range(4)] for _ in range(num_attr)]
         idx = 0
         while idx < total_cnt:
+            print('Current Idx: '  + str(idx))
             end = min([idx + batch_size, total_cnt])
             this_batch_size = end - idx
 

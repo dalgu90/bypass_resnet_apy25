@@ -48,7 +48,7 @@ from six.moves import xrange  # pylint: disable=redefined-builtin
 import tensorflow as tf
 
 import model
-import apascal_input
+import apascal_input as data_input
 
 from IPython import embed
 
@@ -62,8 +62,6 @@ tf.app.flags.DEFINE_integer('display', 10,
                             """Number of iterations to display training info.""")
 tf.app.flags.DEFINE_integer('test_interval', 50,
                             """Number of iterations to run a test""")
-#tf.app.flags.DEFINE_integer('test_iter', 20,
-#                            """Number of iterations in a test""")
 tf.app.flags.DEFINE_integer('checkpoint_interval', 100,
                             """Number of iterations to save parameters as a checkpoint""")
 tf.app.flags.DEFINE_float('gpu_fraction', 0.95,
@@ -85,18 +83,14 @@ def train():
   with tf.Graph().as_default():
     init_step = 0
     global_step = tf.Variable(0, trainable=False)
-    train_flag = tf.placeholder(tf.bool, name="train_flag")
 
     # Get images and labels for aPascal.
     train_images, train_labels = model.distorted_inputs(False)
     test_images, test_labels = model.inputs(True)
 
-    def fn_train_inputs(): return train_images, train_labels
-    def fn_test_inputs(): return test_images, test_labels
-
-    images, labels = tf.cond(train_flag, fn_train_inputs, fn_test_inputs)
-
     # Build a Graph that computes the predictions from the inference model.
+    images = tf.placeholder(tf.float32, [FLAGS.batch_size, data_input.IMAGE_WIDTH, data_input.IMAGE_WIDTH, 3])
+    labels = tf.placeholder(tf.int32, [FLAGS.batch_size, data_input.NUM_ATTRS])
     probs = model.inference(images)
 
     # Calculate loss. (cross_entropy loss)
@@ -146,8 +140,9 @@ def train():
     for step in xrange(init_step, FLAGS.max_steps):
       start_time = time.time()
       try:
+        train_images_val, train_labels_val = sess.run([train_images, train_labels])
         _, lr_value, loss_value, acc_value, train_summary_str = sess.run([train_op, lr, loss, acc, train_summary_op],
-                                                                         feed_dict={train_flag:True})
+                                                                         feed_dict={images:train_images_val, labels:train_labels_val})
       except tf.python.framework.errors.InvalidArgumentError:
         embed()
       duration = time.time() - start_time
@@ -167,8 +162,9 @@ def train():
         summary_writer.add_summary(train_summary_str, step)
 
       if step % FLAGS.test_interval == 0:
+        test_images_val, test_labels_val = sess.run([test_images, test_labels])
         loss_value, acc_value, test_summary_str = sess.run([loss, acc, test_summary_op],
-                                                           feed_dict={train_flag:False})
+                                                           feed_dict={images:test_images_val, labels:test_labels_val})
         format_str = ('%s: (Test)     step %d, loss=%.4f, acc=%.4f')
         print (format_str % (datetime.now(), step, loss_value, acc_value))
         summary_writer.add_summary(test_summary_str, step)
@@ -180,10 +176,6 @@ def train():
 
 
 def main(argv=None):  # pylint: disable=unused-argument
-  # cifar10.maybe_download_and_extract()
-  # if gfile.Exists(FLAGS.train_dir):
-  #   gfile.DeleteRecursively(FLAGS.train_dir)
-  # gfile.MakeDirs(FLAGS.train_dir)
   train()
 
 

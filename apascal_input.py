@@ -71,7 +71,7 @@ def read_apascal(txt_fpath, dataset_root, shuffle=False):
   result = APascalRecord()
 
   # Read a line from the file(list_fname)
-  filename_queue = tf.train.string_input_producer([txt_fpath])
+  filename_queue = tf.train.string_input_producer([txt_fpath], shuffle=shuffle)
   text_reader = tf.TextLineReader()
   _, value = text_reader.read(filename_queue)
 
@@ -218,7 +218,7 @@ def distorted_inputs(eval_data, batch_size, shuffle=True):
   distorted_image = preprocess_image(distorted_image)
 
   # Ensure that the random shuffling has good mixing properties.
-  min_fraction_of_examples_in_queue = 0.4
+  min_fraction_of_examples_in_queue = 0.02
   min_queue_examples = int(NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN *
                            min_fraction_of_examples_in_queue)
   print ('Filling queue with %d aPascal images before starting to train. '
@@ -269,7 +269,7 @@ def inputs(eval_data, batch_size, shuffle=True):
   image = preprocess_image(read_input.image)
 
   # Ensure that the random shuffling has good mixing properties.
-  min_fraction_of_examples_in_queue = 0.4
+  min_fraction_of_examples_in_queue = 0.02
   min_queue_examples = int(num_examples_per_epoch *
                            min_fraction_of_examples_in_queue)
 
