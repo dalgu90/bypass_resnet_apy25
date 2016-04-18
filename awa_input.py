@@ -13,13 +13,11 @@
 # limitations under the License.
 # ==============================================================================
 
-"""Routine for loading the (aPascal) image file format."""
+"""Routine for loading the (AwA) image file format."""
 
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
-
-import os
 
 import tensorflow as tf
 
@@ -27,31 +25,34 @@ from tensorflow.python.platform import gfile
 
 
 # Global constants describing the aPascal data set.
-#tf.app.flags.DEFINE_string('apascal_root','/home/dalgu/dataset/apascal/dataset_crop_total/',
-#                           """Directory where to write log and checkpoint.""")
-#IMAGE_ROOT = '/data/common_datasets/apascal/dataset_crop_total/'
-IMAGE_ROOT = '/home/dalgu/dataset/apascal/dataset_crop_total/'
-TRAIN_DATASET_FPATH = '/home/dalgu/dataset/apascal/dataset_crop_total/train_apy25.txt'
-TRAIN_POSNEG_FPATH = '/home/dalgu/dataset/apascal/dataset_crop_total/posneg_apy25'
-EVAL_DATASET_FPATH = '' # NO val split
-TEST_DATASET_FPATH = '/home/dalgu/dataset/apascal/dataset_crop_total/test_apy25.txt'
+IMAGE_ROOT = '/data/common_datasets/AwA/JPEGImages/'
 
+## Class split(30/10/10)
+#TRAIN_DATASET_FPATH = '/data/common_datasets/AwA/Animals_with_Attributes/scripts/class_split/train_dataset.txt'
+#TRAIN_POSNEG_FPATH = '/data/common_datasets/AwA/Animals_with_Attributes/scripts/class_split/train_posneg.txt'
+#EVAL_DATASET_FPATH = '/data/common_datasets/AwA/Animals_with_Attributes/scripts/class_split/val_dataset.txt'
+#TEST_DATASET_FPATH = '/data/common_datasets/AwA/Animals_with_Attributes/scripts/class_split/test_dataset.txt'
+## Instance split(0.4/0.1/0.5)
+TRAIN_DATASET_FPATH = '/data/common_datasets/AwA/Animals_with_Attributes/scripts/instance_split/train_dataset.txt'
+TRAIN_POSNEG_FPATH = '/data/common_datasets/AwA/Animals_with_Attributes/scripts/instance_split/train_posneg.txt'
+EVAL_DATASET_FPATH = '/data/common_datasets/AwA/Animals_with_Attributes/scripts/instance_split/val_dataset.txt'
+TEST_DATASET_FPATH = '/data/common_datasets/AwA/Animals_with_Attributes/scripts/instance_split/test_dataset.txt'
 
-NUM_ATTRS = 25
-NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN = -1 # will be set after input()/distorted_input() is called
-NUM_EXAMPLES_PER_EPOCH_FOR_EVAL = -1 # will be set after input()/distorted_input() is called
-NUM_EXAMPLES_PER_EPOCH_FOR_TEST = -1 # will be set after input()/distorted_input() is called
+NUM_ATTRS = 85
+NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN = -1 # will be set after input() is called
+NUM_EXAMPLES_PER_EPOCH_FOR_EVAL = -1 # will be set after input() is called
+NUM_EXAMPLES_PER_EPOCH_FOR_TEST = -1 # will be set after input() is called
 
-# Constants used in Caffenet
+# Constants used in the model
 IMAGE_HEIGHT =224
 IMAGE_WIDTH =224
 
-print('[aPascal Dataset Configuration]')
+print('[AwA Dataset Configuration]')
 print('\tDataset root: %s' % IMAGE_ROOT)
 print('\tNumber of attributes: %d' % NUM_ATTRS)
 
 def read_input_file(txt_fpath, dataset_root, shuffle=False):
-  """Reads and parses examples from aPascal data files.
+  """Reads and parses examples from AwA data files.
 
   Recommendation: if you want N-way read parallelism, call this function
   N times.  This will give you N independent Readers reading different
@@ -167,14 +168,12 @@ def distorted_inputs(data_class, batch_size, shuffle=True):
     images: Images. 4D tensor of [batch_size, IMAGE_SIZE, IMAGE_SIZE, 3] size.
     labels: Labels. 1D tensor of [batch_size] size.
   """
+  dataset_root = IMAGE_ROOT
   if data_class.lower() == 'train':
-    dataset_root = os.path.join(IMAGE_ROOT, 'train', '_')[:-1]
     txt_fpath = TRAIN_DATASET_FPATH
   elif data_class.lower() == 'eval':
-    raise ValueError("No eval dataset split")
     txt_fpath = EVAL_DATASET_FPATH
   elif data_class.lower() == 'test':
-    dataset_root = os.path.join(IMAGE_ROOT, 'test', '_')[:-1]
     txt_fpath = TEST_DATASET_FPATH
 
   for f in [dataset_root, txt_fpath]:
@@ -187,7 +186,8 @@ def distorted_inputs(data_class, batch_size, shuffle=True):
         global NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN
         NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN = num_examples_per_epoch
     elif data_class.lower() == 'eval':
-        pass
+        global NUM_EXAMPLES_PER_EPOCH_FOR_EVAL
+        NUM_EXAMPLES_PER_EPOCH_FOR_EVAL = num_examples_per_epoch
     elif data_class.lower() == 'test':
         global NUM_EXAMPLES_PER_EPOCH_FOR_TEST
         NUM_EXAMPLES_PER_EPOCH_FOR_TEST = num_examples_per_epoch
@@ -248,14 +248,12 @@ def inputs(data_class, batch_size, shuffle=True):
     images: Images. 4D tensor of [batch_size, IMAGE_HEIGHT, IMAGE_WIDTH, 3] size.
     labels: Labels. 1D tensor of [batch_size] size.
   """
+  dataset_root = IMAGE_ROOT
   if data_class.lower() == 'train':
-    dataset_root = os.path.join(IMAGE_ROOT, 'train', '_')[:-1]
     txt_fpath = TRAIN_DATASET_FPATH
   elif data_class.lower() == 'eval':
-    raise ValueError("No eval dataset split")
     txt_fpath = EVAL_DATASET_FPATH
   elif data_class.lower() == 'test':
-    dataset_root = os.path.join(IMAGE_ROOT, 'test', '_')[:-1]
     txt_fpath = TEST_DATASET_FPATH
 
   for f in [dataset_root, txt_fpath]:
@@ -265,13 +263,14 @@ def inputs(data_class, batch_size, shuffle=True):
   with open(txt_fpath, 'r') as fd:
     num_examples_per_epoch = len(fd.readlines())
     if data_class.lower() == 'train':
-        global NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN
-        NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN = num_examples_per_epoch
+      global NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN
+      NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN = num_examples_per_epoch
     elif data_class.lower() == 'eval':
-        pass
+      global NUM_EXAMPLES_PER_EPOCH_FOR_EVAL
+      NUM_EXAMPLES_PER_EPOCH_FOR_EVAL = num_examples_per_epoch
     elif data_class.lower() == 'test':
-        global NUM_EXAMPLES_PER_EPOCH_FOR_TEST
-        NUM_EXAMPLES_PER_EPOCH_FOR_TEST = num_examples_per_epoch
+      global NUM_EXAMPLES_PER_EPOCH_FOR_TEST
+      NUM_EXAMPLES_PER_EPOCH_FOR_TEST = num_examples_per_epoch
 
   print('\tLoad file list from %s' % txt_fpath)
   print('\tTotal %d files' % num_examples_per_epoch)

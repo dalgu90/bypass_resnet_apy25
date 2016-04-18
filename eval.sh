@@ -5,7 +5,7 @@ checkpoint_dir="./$1"
 test_output="$checkpoint_dir/eval_test.txt"
 train_output="$checkpoint_dir/eval_train.txt"
 batch_size=32
-gpu_fraction=0.45
+gpu_fraction=0.96
 
 python eval.py --checkpoint_dir $checkpoint_dir \
                --output $test_output \

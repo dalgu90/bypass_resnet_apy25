@@ -3,7 +3,7 @@ from IPython import embed
 import tensorflow as tf
 
 import model
-import apascal_input as data_input
+import awa_input as data_input
 
 FLAGS = tf.app.flags.FLAGS
 tf.app.flags.DEFINE_string('checkpoint_dir', './train',
@@ -17,8 +17,7 @@ tf.app.flags.DEFINE_boolean('embed', False,
 tf.app.flags.DEFINE_float('gpu_fraction', 0.95,
                             """The fraction of GPU memory to be allocated""")
 
-DATASET_TEST_PATH = '/home/dalgu/dataset/apascal/dataset_crop_total/test_apy25.txt'
-DATASET_ROOT = '/home/dalgu/dataset/apascal/dataset_crop_total/'
+#DATASET_ATTRIBUTE_PATH = '/data/common_datasets/AwA/Animals_with_Attributes/predicates.txt'
 DATASET_ATTRIBUTE_PATH = '/home/dalgu/dataset/apascal/attribute_names_apy25.txt'
 
 def evaluate():
@@ -28,18 +27,20 @@ def evaluate():
     print('\tOutput: %s' % FLAGS.output)
 
     with open(DATASET_ATTRIBUTE_PATH, 'r') as fd:
-        attribute_list = [temp.strip() for temp in fd.readlines()]
+#        attribute_list = [temp.strip() for temp in fd.readlines()]
+        attribute_list = [temp.strip().split()[1] for temp in fd.readlines()]
     batch_size = FLAGS.batch_size
     num_attr = data_input.NUM_ATTRS
 
     with tf.Graph().as_default():
-        test_images, test_labels = model.inputs(not FLAGS.train_data, False)
+        test_images, test_labels = model.inputs('train' if FLAGS.train_data else 'test', False)
         test_probs = model.inference(test_images)
 
         if FLAGS.train_data:
             total_cnt = data_input.NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN
         else:
-            total_cnt = data_input.NUM_EXAMPLES_PER_EPOCH_FOR_EVAL
+            total_cnt = data_input.NUM_EXAMPLES_PER_EPOCH_FOR_TEST
+
 
         # Start running operations on the Graph.
         init = tf.initialize_all_variables()
@@ -108,7 +109,10 @@ def evaluate():
             precision.append(0.0)
         else:
             precision.append(tp/float(tp+fp))
-        recall.append(tp/float(tp+fn))
+        if tp+fn == 0:
+            recall.append(0.0)
+        else:
+            recall.append(tp/float(tp+fn))
         if precision[i] == .0 or np.isnan(precision[i]) or recall[i] == .0:
             f1.append(0.0)
         else:

@@ -45,7 +45,7 @@ from IPython import embed
 import numpy as np
 import tensorflow as tf
 
-import apascal_input as data_input
+import awa_input as data_input
 
 FLAGS = tf.app.flags.FLAGS
 
@@ -109,32 +109,35 @@ print('\tMax gradient norm %f' % MAX_GRADIENT_NORM)
 # to differentiate the operations. Note that this prefix is removed from the
 # names of the summaries when visualizing a model.
 TOWER_NAME = 'tower'
-activation_tensor_name_set = set()
-def _activation_summary(x):
+def _histogram_summary(x):
     # Remove 'tower_[0-9]/' from the name in case this is a multi-GPU training
     # session. This helps the clarity of presentation on tensorboard.
     tensor_name = re.sub('%s_[0-9]*/' % TOWER_NAME, '', x.op.name)
-    global activation_tensor_name_set
-    if tensor_name in activation_tensor_name_set:
-        return
-    else:
-        activation_tensor_name_set.add(tensor_name)
-        tf.histogram_summary(tensor_name + '/activations', x)
-        tf.scalar_summary(tensor_name + '/sparsity', tf.nn.zero_fraction(x))
+    tf.histogram_summary(tensor_name + '/activations', x)
+
+def _sparsity_summary(x):
+    tensor_name = re.sub('%s_[0-9]*/' % TOWER_NAME, '', x.op.name)
+    tf.scalar_summary(tensor_name + '/sparsity', tf.nn.zero_fraction(x))
+
+def _almost_sparsity_summary(x, eps):
+    tensor_name = re.sub('%s_[0-9]*/' % TOWER_NAME, '', x.op.name)
+    eps_t = tf.constant(eps, dtype=x.dtype, name="threshold")
+    fraction = tf.reduce_mean(tf.cast(tf.less(tf.abs(x), eps_t), tf.float32))
+    tf.scalar_summary(tensor_name + '/less_than_' + ("%g" % eps), fraction)
 
 
-
-def distorted_inputs(eval_data, shuffle=True):
-    return data_input.distorted_inputs(eval_data=eval_data,
+def distorted_inputs(data_class, shuffle=True):
+    return data_input.distorted_inputs(data_class=data_class,
                                        batch_size=FLAGS.batch_size,
                                        shuffle=shuffle)
 
 
-def inputs(eval_data, shuffle=True):
+def inputs(data_class, shuffle=True):
     """Construct input for CIFAR evaluation using the Reader ops.
 
     Args:
-      eval_data: bool, indicating if one should use the train or eval data set.
+      data_class: string, indicating if one should use the 'train' or 'eval' or 'test' data set.
+      shuffle: bool, to shuffle dataset list to read
 
     Returns:
       images: Images. 4D tensor of [batch_size, IMAGE_SIZE, IMAGE_SIZE, 3] size.
@@ -143,7 +146,7 @@ def inputs(eval_data, shuffle=True):
     Raises:
       ValueError: If no data_dir
     """
-    return data_input.inputs(eval_data=eval_data,
+    return data_input.inputs(data_class=data_class,
                              batch_size=FLAGS.batch_size,
                              shuffle=shuffle)
 
@@ -206,17 +209,20 @@ def inference(images):
         weights = utils.tf_variable_weight_decay('weights', [flattened.get_shape()[1].value, data_input.NUM_ATTRS], tf.truncated_normal_initializer(stddev=0.01))
         biases = utils.tf_variable('biases', [data_input.NUM_ATTRS], tf.constant_initializer(value=0.0))
         fc = tf.nn.relu(tf.nn.bias_add(tf.matmul(flattened, weights), biases), name="fc")
+#        _histogram_summary(weights)
         bypass_layers.append(fc)
     with tf.variable_scope('pool5') as scope:
       flattened = tf.reshape(pool5, [pool5.get_shape()[0].value, pool5.get_shape()[3].value])
       weights = utils.tf_variable_weight_decay('weights', [flattened.get_shape()[1].value, data_input.NUM_ATTRS], tf.truncated_normal_initializer(stddev=0.01))
       biases = utils.tf_variable('biases', [data_input.NUM_ATTRS], tf.constant_initializer(value=0.0))
       fc = tf.nn.relu(tf.nn.bias_add(tf.matmul(flattened, weights), biases), name="fc")
+#      _histogram_summary(weights)
       bypass_layers.append(fc)
     with tf.variable_scope('res_prob') as scope:
       weights = utils.tf_variable_weight_decay('weights', [res_prob.get_shape()[1].value, data_input.NUM_ATTRS], tf.truncated_normal_initializer(stddev=0.01))
       biases = utils.tf_variable('biases', [data_input.NUM_ATTRS], tf.constant_initializer(value=0.0))
       fc = tf.nn.relu(tf.nn.bias_add(tf.matmul(res_prob, weights), biases), name="fc")
+#      _histogram_summary(weights)
       bypass_layers.append(fc)
 
   print('\tTotal %d bypass layers' % len(bypass_layers))
@@ -239,7 +245,10 @@ def inference(images):
       weights_list.append(weights)
     prob = tf.concat(1, prob_list, name=scope.name)
     weights_concat = tf.concat(1, weights_list, name='l1_weights')
-    _activation_summary(weights_concat)
+    _histogram_summary(weights_concat)
+    _sparsity_summary(weights_concat)
+    _almost_sparsity_summary(weights_concat, 10**-7)
+    _almost_sparsity_summary(weights_concat, 10**-5)
 
   return prob
 
@@ -256,7 +265,7 @@ def loss_acc(probs, labels):
     Loss tensor of type float.
   """
   # Calculate pos/neg loss weights for each attributes
-  with open(os.path.join(data_input.APASCAL_ROOT, 'posneg_train_apy25.txt'), 'r') as fd:
+  with open(data_input.TRAIN_POSNEG_FPATH, 'r') as fd:
     posneg_ll = [map(int, line.strip().split()) for line in fd.readlines()]
   #loss_posneg = [[np.sqrt(n), np.sqrt(p)]/(np.sqrt(p)+np.sqrt(n)) for p, n in posneg_ll]
   loss_posneg = [[np.float64(p+n)/np.sqrt(p), np.float64(p+n)/np.sqrt(n)]/(np.sqrt(p)+np.sqrt(n)) for p, n in posneg_ll]
@@ -272,11 +281,8 @@ def loss_acc(probs, labels):
 
   # Average cross-entropy loss over the attrs. and the batch
   cross_entropy_mean = tf.reduce_mean(cross_entropy, name='cross_entropy')
-  global ce_loss_flag
-  if not ce_loss_flag:
-    ce_loss_flag = True
-    tf.add_to_collection('losses', cross_entropy_mean)
-    print('\tCross-entropy loss added: %s' % cross_entropy_mean.name)
+  tf.add_to_collection('losses', cross_entropy_mean)
+  print('\tCross-entropy loss added: %s' % cross_entropy_mean.name)
 
   # Calculate accuracy
   output_shape = [FLAGS.batch_size, data_input.NUM_ATTRS]
@@ -363,6 +369,10 @@ def train(total_loss, global_step):
 #      basenet_clip_g_list, _ = tf.clip_by_global_norm(basenet_g_list, MAX_GRADIENT_NORM)
 #      basenet_grad = zip(basenet_clip_g_list, basenet_v_list)
 
+#      for g, v in basenet_grads:
+#        _histogram_summary(g) # gradient check
+#        _histogram_summary(v) # variable check
+
       grads = grads + basenet_grads
 
     if BASENET_TRAIN:
@@ -374,6 +384,11 @@ def train(total_loss, global_step):
 #    bypass_g_list, bypass_v_list = zip(*bypass_grads)
 #    bypass_clip_g_list, _ = tf.clip_by_global_norm(bypass_g_list, MAX_GRADIENT_NORM)
 #    bypass_grad = zip(bypass_clip_g_list, bypass_v_list)
+
+#    for g, v in bypass_grads:
+#        if v.name.startswith("prob/weights"):
+#            _histogram_summary(g)
+#            _histogram_summary(v)
 
     grads = grads + bypass_grads
 
@@ -404,28 +419,31 @@ def train(total_loss, global_step):
   # If basenet weights are trained together, do not set a weight decay on the
   # conv layers of the basenet
   l2_op_list = []
-  if L2_LOSS_WEIGHT > 0:
-    for var in tf.get_collection(utils.WEIGHT_DECAY_KEY):
-      if var in resnet_vars[:-2]: # exclude the weights, bias of the last fc layer
-        continue
-        #l2_weight = L2_LOSS_WEIGHT * BASENET_LR_RATIO
-      else:
-        l2_weight = L2_LOSS_WEIGHT
-      assign_op = var.assign_add(- lr * tf.convert_to_tensor(l2_weight) * var)
-      l2_op_list.append(assign_op)
-      print('\tL2 loss added: %s(strength: %f)' % (var.name, l2_weight))
+  with tf.control_dependencies(apply_grad_op_list):
+    if L2_LOSS_WEIGHT > 0:
+      for var in tf.get_collection(utils.WEIGHT_DECAY_KEY):
+        if var in resnet_vars[:-2]: # exclude the weights, bias of the last fc layer
+          continue
+          #l2_weight = L2_LOSS_WEIGHT * BASENET_LR_RATIO
+        else:
+          l2_weight = L2_LOSS_WEIGHT
+        assign_op = var.assign_add(- lr * tf.convert_to_tensor(l2_weight) * var)
+        l2_op_list.append(assign_op)
+        print('\tL2 loss added: %s(strength: %f)' % (var.name, l2_weight))
 
   # Apply proximal gradient for the variables with l1 lasso loss
   # Non-negative weights constraint
   l1_op_list = []
-  if L1_LOSS_WEIGHT > 0:
-    for var in tf.get_collection(utils.LASSO_KEY):
-      th_t = tf.fill(tf.shape(var), tf.convert_to_tensor(L1_LOSS_WEIGHT) * lr)
-      zero_t = tf.zeros(tf.shape(var))
-      var_temp = var - th_t * tf.sign(var)
-      assign_op = var.assign(tf.select(tf.less(var, th_t), zero_t, var_temp))
-      l1_op_list.append(assign_op)
-      print('\tL1 loss added: %s(strength: %f)' % (var.name, L1_LOSS_WEIGHT))
+  with tf.control_dependencies(l2_op_list):
+    if L1_LOSS_WEIGHT > 0:
+      for var in tf.get_collection(utils.LASSO_KEY):
+        th_t = tf.fill(tf.shape(var), tf.convert_to_tensor(L1_LOSS_WEIGHT) * lr)
+        zero_t = tf.zeros(tf.shape(var))
+        var_temp = var - th_t * tf.sign(var)
+        assign_op = var.assign(tf.select(tf.less(var, th_t), zero_t, var_temp))
+        l1_op_list.append(assign_op)
+        print('\tL1 loss added: %s(strength: %f)' % (var.name, L1_LOSS_WEIGHT))
+
 
   # Add histograms for trainable variables.
 #  for var in tf.trainable_variables():
@@ -437,11 +455,11 @@ def train(total_loss, global_step):
 #      tf.histogram_summary(var.op.name + '/gradients', grad)
 
   # Track the moving averages of all trainable variables.
-  variable_averages = tf.train.ExponentialMovingAverage(
-      MOVING_AVERAGE_DECAY, global_step)
-  variables_averages_op = variable_averages.apply(tf.trainable_variables())
+#  variable_averages = tf.train.ExponentialMovingAverage(
+#      MOVING_AVERAGE_DECAY, global_step)
+#  variables_averages_op = variable_averages.apply(tf.trainable_variables())
 
-  with tf.control_dependencies(apply_grad_op_list + l2_op_list + l1_op_list):
+  with tf.control_dependencies(l1_op_list):
     train_op = tf.no_op(name='train')
 
   return train_op, lr

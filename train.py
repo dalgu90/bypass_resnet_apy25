@@ -48,7 +48,7 @@ from six.moves import xrange  # pylint: disable=redefined-builtin
 import tensorflow as tf
 
 import model
-import apascal_input as data_input
+import awa_input as data_input
 
 from IPython import embed
 
@@ -85,8 +85,8 @@ def train():
     global_step = tf.Variable(0, trainable=False)
 
     # Get images and labels for aPascal.
-    train_images, train_labels = model.distorted_inputs(False)
-    test_images, test_labels = model.inputs(True)
+    train_images, train_labels = model.distorted_inputs('train')
+    test_images, test_labels = model.inputs('eval')
 
     # Build a Graph that computes the predictions from the inference model.
     images = tf.placeholder(tf.float32, [FLAGS.batch_size, data_input.IMAGE_WIDTH, data_input.IMAGE_WIDTH, 3])
@@ -119,7 +119,7 @@ def train():
     sess.run(init)
 
     # Create a saver.
-    saver = tf.train.Saver(tf.all_variables())
+    saver = tf.train.Saver(tf.all_variables(), max_to_keep=10000)
     ckpt = tf.train.get_checkpoint_state(FLAGS.train_dir)
     if ckpt and ckpt.model_checkpoint_path:
         print('\tRestore from %s' % ckpt.model_checkpoint_path)
