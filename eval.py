@@ -16,9 +16,11 @@ tf.app.flags.DEFINE_boolean('embed', False,
                            """Open IPython shell after building model and restoring from checkpoint""")
 tf.app.flags.DEFINE_float('gpu_fraction', 0.95,
                             """The fraction of GPU memory to be allocated""")
+tf.app.flags.DEFINE_string('train_dir', './train_loss_weight2',
+                           """Directory where to load pretrained model.absolute_importgj""")
 
-#DATASET_ATTRIBUTE_PATH = '/data/common_datasets/AwA/Animals_with_Attributes/predicates.txt'
-DATASET_ATTRIBUTE_PATH = '/home/dalgu/dataset/apascal/attribute_names_apy25.txt'
+DATASET_ATTRIBUTE_PATH = '/data/common_datasets/AwA/Animals_with_Attributes/predicates.txt'
+#DATASET_ATTRIBUTE_PATH = '/home/dalgu/dataset/apascal/attribute_names_apy25.txt'
 
 def evaluate():
     print('[Testing Configuration]')
@@ -30,7 +32,7 @@ def evaluate():
 #        attribute_list = [temp.strip() for temp in fd.readlines()]
         attribute_list = [temp.strip().split()[1] for temp in fd.readlines()]
     batch_size = FLAGS.batch_size
-    num_attr = data_input.NUM_ATTRS
+    num_attr = model.NUM_ATTRS
 
     with tf.Graph().as_default():
         test_images, test_labels = model.inputs('train' if FLAGS.train_data else 'test', False)

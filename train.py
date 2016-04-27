@@ -48,7 +48,6 @@ from six.moves import xrange  # pylint: disable=redefined-builtin
 import tensorflow as tf
 
 import model
-import awa_input as data_input
 
 from IPython import embed
 
@@ -89,8 +88,8 @@ def train():
     test_images, test_labels = model.inputs('eval')
 
     # Build a Graph that computes the predictions from the inference model.
-    images = tf.placeholder(tf.float32, [FLAGS.batch_size, data_input.IMAGE_WIDTH, data_input.IMAGE_WIDTH, 3])
-    labels = tf.placeholder(tf.int32, [FLAGS.batch_size, data_input.NUM_ATTRS])
+    images = tf.placeholder(tf.float32, [FLAGS.batch_size, model.IMAGE_WIDTH, model.IMAGE_WIDTH, 3])
+    labels = tf.placeholder(tf.int32, [FLAGS.batch_size, model.NUM_ATTRS])
     probs = model.inference(images)
 
     # Calculate loss. (cross_entropy loss)
@@ -122,12 +121,20 @@ def train():
     saver = tf.train.Saver(tf.all_variables(), max_to_keep=10000)
     ckpt = tf.train.get_checkpoint_state(FLAGS.train_dir)
     if ckpt and ckpt.model_checkpoint_path:
-        print('\tRestore from %s' % ckpt.model_checkpoint_path)
-        # Restores from checkpoint
-        saver.restore(sess, ckpt.model_checkpoint_path)
-        init_step = int(ckpt.model_checkpoint_path.split('/')[-1].split('-')[-1])
+      print('\tRestore from %s' % ckpt.model_checkpoint_path)
+      # Restores from checkpoint
+      saver.restore(sess, ckpt.model_checkpoint_path)
+      init_step = int(ckpt.model_checkpoint_path.split('/')[-1].split('-')[-1])
     else:
-        print('No checkpoint file found. Start from the scratch.')
+      print('No checkpoint file found. Start from the scratch.')
+      # if finetune, load variables of the final predication layers
+      # from pretrained model
+      if FLAGS.finetune:
+        base_variables = tf.trainable_variables()[:-2*model.NUM_ATTRS]
+        base_saver = tf.train.Saver(base_variables, max_to_keep=10000)
+        ckpt = tf.train.get_checkpoint_state(FLAGS.pretrained_dir)
+        print('Initial checkpoint: ' + ckpt.model_checkpoint_path)
+        base_saver.restore(sess, ckpt.model_checkpoint_path)
 
     # Start the queue runners.
     tf.train.start_queue_runners(sess=sess)

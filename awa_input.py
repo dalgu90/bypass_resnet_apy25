@@ -37,6 +37,8 @@ TRAIN_DATASET_FPATH = '/data/common_datasets/AwA/Animals_with_Attributes/scripts
 TRAIN_POSNEG_FPATH = '/data/common_datasets/AwA/Animals_with_Attributes/scripts/instance_split/train_posneg.txt'
 EVAL_DATASET_FPATH = '/data/common_datasets/AwA/Animals_with_Attributes/scripts/instance_split/val_dataset.txt'
 TEST_DATASET_FPATH = '/data/common_datasets/AwA/Animals_with_Attributes/scripts/instance_split/test_dataset.txt'
+ATTRIBUTE_LIST_FPATH = '/data/common_datasets/AwA/Animals_with_Attributes/predicates.txt'
+
 
 NUM_ATTRS = 85
 NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN = -1 # will be set after input() is called

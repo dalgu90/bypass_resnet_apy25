@@ -42,10 +42,9 @@ import resnet.utils as utils
 
 from IPython import embed
 
+import cPickle as pickle
 import numpy as np
 import tensorflow as tf
-
-import awa_input as data_input
 
 FLAGS = tf.app.flags.FLAGS
 
@@ -71,6 +70,16 @@ tf.app.flags.DEFINE_boolean('basenet_train', True,
                             """Flag whether the model will train the base network""")
 tf.app.flags.DEFINE_float('basenet_lr_ratio', 0.1,
                             """Learning rate ratio of basenet to bypass net""")
+tf.app.flags.DEFINE_boolean('finetune', False,
+                            """Flag whether the L1 connection weights will be only made at
+                            the position where the original bypass network has nonzero
+                            L1 connection weights""")
+tf.app.flags.DEFINE_string('pretrained_dir', './pretrain',
+                           """Directory where to load pretrained model.(Only for
+                           --finetune True""")
+
+import awa_input as data_input
+
 
 print('[Network Configuration]')
 # Batch size
@@ -232,23 +241,53 @@ def inference(images):
   for fc in bypass_layers:
     fc_slice_ll.append(tf.split(1, data_input.NUM_ATTRS, fc))
 
-  # Concatenate and output(sigmoid)
-  # Check the weight sparsity
+  ##### Selection layers
   prob_list = []
-  weights_list = []
-  with tf.variable_scope('prob') as scope:
-    for i in range(data_input.NUM_ATTRS):
-      concat = tf.concat(1, [slices[i] for slices in fc_slice_ll], name=("concat%d"%(i+1)) )
-      weights = utils.tf_variable_lasso(('weights%d'%(i+1)), [len(bypass_layers), 1], tf.truncated_normal_initializer(stddev= 0.01))
-      biases = utils.tf_variable(('biases%d'%(i+1)), [1], tf.constant_initializer())
-      prob_list.append(tf.sigmoid(tf.nn.bias_add(tf.matmul(concat, weights), biases), name=("prob%d"%(i+1))))
-      weights_list.append(weights)
-    prob = tf.concat(1, prob_list, name=scope.name)
-    weights_concat = tf.concat(1, weights_list, name='l1_weights')
-    _histogram_summary(weights_concat)
-    _sparsity_summary(weights_concat)
-    _almost_sparsity_summary(weights_concat, 10**-7)
-    _almost_sparsity_summary(weights_concat, 10**-5)
+  lasso_weights_list = []
+  # 1. Pretrain - Each classes/attrs are connected to all bypass layers
+  if not FLAGS.finetune:
+    # Concatenate and output(sigmoid)
+    # Check the weight sparsity
+    with tf.variable_scope('prob') as scope:
+      for i in range(data_input.NUM_ATTRS):
+        concat = tf.concat(1, [slices[i] for slices in fc_slice_ll], name=("concat%d"%(i+1)) )
+        weights = utils.tf_variable_lasso(('weights%d'%(i+1)), [len(bypass_layers), 1], tf.truncated_normal_initializer(stddev= 0.01))
+        biases = utils.tf_variable(('biases%d'%(i+1)), [1], tf.constant_initializer())
+        prob_list.append(tf.sigmoid(tf.nn.bias_add(tf.matmul(concat, weights), biases), name=("prob%d"%(i+1))))
+        lasso_weights_list.append(weights)
+  # 2. Finetune - Each classes/attrs are connected to layers only with nonzero
+  # pretrain weights
+  else:
+    # Concatenate and output(sigmoid)
+    # Check the weight sparsity
+    with open(os.path.join(FLAGS.pretrained_dir, 'l1_weight.pkl'), 'r') as fd:
+      train_weight_dict = pickle.load(fd)
+    with open(data_input.ATTRIBUTE_LIST_FPATH, 'r') as fd:
+      predicate_list = [temp.strip().split()[1] for temp in fd.readlines()]
+    with tf.variable_scope('prob') as scope:
+      for i in range(data_input.NUM_ATTRS):
+        # only take slices of predictions with non-zero training weights
+        train_weight = train_weight_dict[predicate_list[i]][0]
+        if(np.sum(np.abs(train_weight)) > 0): # not all weights are zero -> connect layers of non-zero weight(but the weights are initialized)
+          nonzero_slices = [fc_slice_ll[j][i] for j in range(len(bypass_layers)) if train_weight[j]]
+          concat = tf.concat(1, nonzero_slices)
+          weights = utils.tf_variable_weight_decay(('weights%d'%(i+1)), [len(nonzero_slices), 1], tf.truncated_normal_initializer(stddev= 0.01))
+        else: # all weights are zero! -> connect all layers with L1 lasso loss
+          concat = tf.concat(1, [slices[i] for slices in fc_slice_ll], name=("concat%d"%(i+1)) )
+          weights = utils.tf_variable_lasso(('weights%d'%(i+1)), [len(bypass_layers), 1], tf.truncated_normal_initializer(stddev= 0.01))
+          lasso_weights_list.append(weights)
+        biases = utils.tf_variable(('biases%d'%(i+1)), [1], tf.constant_initializer())
+        prob_list.append(tf.sigmoid(tf.nn.bias_add(tf.matmul(concat, weights), biases), name=("prob%d"%(i+1))))
+
+  # Concatenate all the predictions along axis-1
+  prob = tf.concat(1, prob_list, name=scope.name)
+  # Concatenate all L1 weights and make histogram
+  if(len(lasso_weights_list) > 0):
+    lasso_weights_concat = tf.concat(1, lasso_weights_list, name='l1_weights')
+    _histogram_summary(lasso_weights_concat)
+    _sparsity_summary(lasso_weights_concat)
+    _almost_sparsity_summary(lasso_weights_concat, 10**-7)
+    _almost_sparsity_summary(lasso_weights_concat, 10**-5)
 
   return prob
 
@@ -393,22 +432,22 @@ def train(total_loss, global_step):
     grads = grads + bypass_grads
 
   # Check numerics of tensors
-  verify_tensor_list = []
-  for i in xrange(len(grads), 0, -1):
-    v, g = grads[i-1]
-    verify_tensor_list.append(tf.check_numerics(v, v.name))
-    verify_tensor_list.append(tf.check_numerics(g, g.name))
+  # verify_tensor_list = []
+  # for i in xrange(len(grads), 0, -1):
+    # v, g = grads[i-1]
+    # verify_tensor_list.append(tf.check_numerics(v, v.name))
+    # verify_tensor_list.append(tf.check_numerics(g, g.name))
 
   # Apply gradients.
   apply_grad_op_list = []
-  with tf.control_dependencies(verify_tensor_list):
-    if BASENET_TRAIN:
-      basenet_apply_grad_op = basenet_opt.apply_gradients(basenet_grads,
-                                                          global_step=global_step)
-      apply_grad_op_list.append(basenet_apply_grad_op)
-    bypass_apply_grad_op = bypass_opt.apply_gradients(bypass_grads,
-                                                      global_step=global_step)
-    apply_grad_op_list.append(bypass_apply_grad_op)
+  # with tf.control_dependencies(verify_tensor_list):
+  if BASENET_TRAIN:
+    basenet_apply_grad_op = basenet_opt.apply_gradients(basenet_grads,
+                                                        global_step=global_step)
+    apply_grad_op_list.append(basenet_apply_grad_op)
+  bypass_apply_grad_op = bypass_opt.apply_gradients(bypass_grads,
+                                                    global_step=global_step)
+  apply_grad_op_list.append(bypass_apply_grad_op)
 
   # If basenet weights are trained together keep the basenet weights
   resnet_vars = []
@@ -419,6 +458,7 @@ def train(total_loss, global_step):
   # If basenet weights are trained together, do not set a weight decay on the
   # conv layers of the basenet
   l2_op_list = []
+  l1_op_list = []
   with tf.control_dependencies(apply_grad_op_list):
     if L2_LOSS_WEIGHT > 0:
       for var in tf.get_collection(utils.WEIGHT_DECAY_KEY):
@@ -431,10 +471,8 @@ def train(total_loss, global_step):
         l2_op_list.append(assign_op)
         print('\tL2 loss added: %s(strength: %f)' % (var.name, l2_weight))
 
-  # Apply proximal gradient for the variables with l1 lasso loss
-  # Non-negative weights constraint
-  l1_op_list = []
-  with tf.control_dependencies(l2_op_list):
+    # Apply proximal gradient for the variables with l1 lasso loss
+    # Non-negative weights constraint
     if L1_LOSS_WEIGHT > 0:
       for var in tf.get_collection(utils.LASSO_KEY):
         th_t = tf.fill(tf.shape(var), tf.convert_to_tensor(L1_LOSS_WEIGHT) * lr)
@@ -459,7 +497,7 @@ def train(total_loss, global_step):
 #      MOVING_AVERAGE_DECAY, global_step)
 #  variables_averages_op = variable_averages.apply(tf.trainable_variables())
 
-  with tf.control_dependencies(l1_op_list):
+  with tf.control_dependencies(l2_op_list + l1_op_list):
     train_op = tf.no_op(name='train')
 
   return train_op, lr
