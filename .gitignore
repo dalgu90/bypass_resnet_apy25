@@ -58,7 +58,9 @@ resnet/*.pkl
 # every shell file except train.sh and eval.sh
 *.sh
 !train.sh
+!finetune.sh
 !eval.sh
 
 # Trained files (named as train~)
 train*/
+finetune*/
